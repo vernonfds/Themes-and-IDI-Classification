@@ -12,6 +12,8 @@ from nltk.tag import pos_tag
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import sys
 import requests
 from gettext import install
@@ -23,15 +25,19 @@ import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 import datetime
+import math
 
+
+print("\n\n******* Python script started *******\n\n")
 
 nltk.download("punkt")
 nltk.download("stopwords")
 nltk.download("wordnet")
 nltk.download("averaged_perceptron_tagger")
-
-#pythonBaseUrl = sys.argv[1]
-#print("pythonBaseUrl : ", pythonBaseUrl)
+# pythonBaseUrl = sys.argv[1]
+# webhookUrl = sys.argv[2]
+webhookUrl = ""
+# print("pythonBaseUrl : ", pythonBaseUrl)
 
 # Classification using Random Forest
 
@@ -45,9 +51,9 @@ def convert(date_time):
 
 
 def classify_posts(posts, accuracy=0.7, window_days=10):
+    print("callling classify_posts")
     # Convert accuracy to similarity threshold (0 <= similarity <= 1)
     similarity_threshold = accuracy
-    print("classify_posts message : ", posts)
     # Use TF-IDF Vectorizer to convert text to vectors
     tfidf = TfidfVectorizer().fit_transform(posts["message"])
 
@@ -82,9 +88,11 @@ def classify_posts(posts, accuracy=0.7, window_days=10):
 
 
 def classifier_rf():
+    print("callling classifier_rf")
     # Load the main data and remove any null values present
     # Open the JSON file with the correct encoding
-    with open("10k Master.json",
+    with open(
+        "10k Master.json",
         encoding="utf-8",
     ) as f:
         # Read the contents of the file
@@ -122,16 +130,27 @@ def classifier_rf():
         + main_data["Vernon Sub Theme"]
         + "-"
         + main_data["Vernon Sub Sub Theme"],
-    )    
-    
+    )
+    # payloadJson = json.loads(sys.argv[3])
     payloadJson = [
         {
-            "id": "64dc881e0d245f917725eefe",
-            "message": "Sh Mukesh Ambani comments on #JioFiber at 44th #RILAGM\n\n#RelianceAGM\n#MadeForIndiaMadeInIndia",
-            "company": "reliance industries",
-            "Date": "29.08.2021"
-            
-        }
+            "id": "651662f26d85af737052ffc8",
+            "message": '"Be sure that there is plenty of space for lawns and gardens. Reserve large areas for football, hockey and parks." â€”Jamsetji Tata As we near the eve of our Founder\'s 184th birth anniversary, we celebrate his vision of both industry &amp; community. #LegendLivesOn (1/2) pic.twitter.com/Gc5YJ5YXkb',
+            "Company Name": "tata group",
+            "Publish Date/Time": "2023-03-01 18:42:28",
+        },
+        {
+            "id": "651662f26d85af737052ffce",
+            "message": '"Be sure that there is plenty of space for lawns and gardens. Reserve large areas for football, hockey and parks." â€”Jamsetji Tata More than just an industrial beacon, Jamshedpur was the epitome of our Founder\'s vision and values. As we near the eve of his 184th birth anniversary, we celebrate his pioneering spirit. Want to know more about the 1st planned industrial city? Click the link in bio. #LegendLivesOn #ThisIsTata',
+            "Company Name": "tata group",
+            "Publish Date/Time": "2023-03-01 18:42:28",
+        },
+        {
+            "id": "651662f36d85af737052ffd4",
+            "message": '"Be sure that there is plenty of space for lawns and gardens. Reserve large areas for football, hockey and parks." â€”Jamsetji Tata More than just an industrial beacon, Jamshedpur was the epitome of our Founder\'s vision and values. As we near the eve of his 184th birth anniversary, we celebrate his pioneering spirit. Want to know more about the 1st planned industrial city? Click here: https://www.youtube.com/watch?v=TgOLdE6cr40 #LegendLivesOn #ThisIsTata',
+            "Company Name": "tata group",
+            "Publish Date/Time": "2023-03-01 18:42:28",
+        },
     ]
     # print("payloadJson")
     # print(payloadJson)
@@ -142,11 +161,12 @@ def classifier_rf():
             {
                 "id": entry["id"],
                 "message": entry["message"],
-                "company": entry["company"],
-                "date": entry["Date"],
+                "company": entry["Company Name"],
+                "date": entry["Publish Date/Time"],
             }
             for entry in payloadJson
-        ])
+        ]
+    )
 
     # print("new_data")
     # print(new_data)
@@ -154,7 +174,7 @@ def classifier_rf():
     # print(new_data["message"])
 
     # Remove duplicates from the new data DataFrame based on the 'message' column
-    new_data = new_data.drop_duplicates(subset=['message'])
+    new_data = new_data.drop_duplicates(subset=["message"])
 
     # Transform the messages in the new data using the fitted vectorizer
     new_data_tfidf = tfidf_vectorizer.transform(new_data["message"])
@@ -204,16 +224,52 @@ def classifier_rf():
 
 # Print the first 15 rows of the new data DataFrame
 new_data = classifier_rf()
+print("calculated new_data success")
 
 # Mark duplicates as 'Duplicate' and unique as 'Unique'
-new_data['Duplicate_Status'] = new_data.duplicated(subset=['message'], keep='first')
-new_data['Duplicate_Status'] = new_data['Duplicate_Status'].replace({True: 'Duplicate', False: 'Unique'})
+# Specify the column you want to check for unique/duplicate values
+column_to_check = "message"  # Replace with your column name
+
+# Set the predefined match percentage threshold
+similarity_threshold = 0.8
+
+# Create a TF-IDF vectorizer
+tfidf_vectorizer = TfidfVectorizer()
+
+# Fit and transform the messages into TF-IDF vectors
+tfidf_matrix = tfidf_vectorizer.fit_transform(new_data[column_to_check])
+
+# Calculate the cosine similarity between all message pairs
+cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+# Initialize the 'Tag' column with "Unique" for all records
+new_data['Tag'] = "Unique"
+
+# Iterate through the similarity matrix to identify duplicates
+for i in range(len(new_data)):
+    if new_data.at[i, 'Tag'] == "Duplicate":
+        continue
+    
+    for j in range(i+1, len(new_data)):
+        if new_data.at[j, 'Tag'] == "Duplicate":
+            continue
+        
+        similarity_score = cosine_sim[i][j]
+        
+        if similarity_score >= similarity_threshold:
+            # Mark both messages as "Duplicate"
+            new_data.at[i, 'Tag'] = "Duplicate"
+            new_data.at[j, 'Tag'] = "Duplicate"
+
 
 # Extraction of Keywords and Keyphrases
 data = new_data
 
+print("calculated duplicate_status success")
+
 
 def extract_keywords(data):
+    print("calling extract_keywords")
     # Load the dataset
     data = new_data
 
@@ -256,12 +312,14 @@ def extract_keywords(data):
 
 data = extract_keywords(data)
 
+print("calculated extract_keywords success")
 # Named Entity Recognition (NER)
 
 
 def extract_entities(data):
+    print("callling extract_entities")
     # Set up the OpenAI API credentials
-    openai.api_key = "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"
+    openai.api_key = "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"
 
     # Define the entity types to extract
     entity_types = [
@@ -317,12 +375,14 @@ def extract_entities(data):
 
 result_df = extract_entities(data)
 
+print("calculated extract_entities success")
 # Summarization and Gists
 
 
 def extract_entities_and_generate_summary_gist(data):
+    print("\n extract_entities_and_generate_summary_gist => calculating")
     # Set up the OpenAI API credentials
-    openai.api_key = "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"
+    openai.api_key = "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"
 
     # Define the entity types to extract
     entity_types = [
@@ -387,16 +447,25 @@ def extract_entities_and_generate_summary_gist(data):
 
 # Resultant Data Frame
 df = extract_entities_and_generate_summary_gist(result_df)
+print("calculated extract_entities_and_generate_summary_gist success")
 
-payloadData = df.head(15).to_dict()
 
-url = "http://43.205.173.0:8091/api/theme/themeWebhook"
+# Replace NaN values with a default value (e.g., 0)
+df = df.fillna(0)
+
+payloadData = df.head(len(df)).to_dict()
+
+url = webhookUrl
 
 print(url)
 
 payload = json.dumps({"data": payloadData})
 headers = {"Content-Type": "application/json"}
 
-response = requests.request("POST", url, headers=headers, data=payload)
+print("\n\n******* Webhook calling *******\n\n")
+print(payload)
 
-print(response.text)
+# response = requests.request("POST", url, headers=headers, data=payload)
+
+# print(response.text)
+print("\n\n******* Python script ended *******\n\n")
